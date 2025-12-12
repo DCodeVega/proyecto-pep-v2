@@ -940,42 +940,68 @@ def eliminar_personal(id):
 def equipo_maquinaria():
     conn = get_db_connection()
     
+    # Obtener proyecto actual
     proyecto = conn.execute('SELECT * FROM proyectos ORDER BY id DESC LIMIT 1').fetchone()
     
+    if not proyecto:
+        conn.close()
+        flash('Primero debes crear un proyecto', 'warning')
+        return redirect(url_for('datos_iniciales'))
+    
+    # Obtener materiales (EQUIPO Y MAQUINARIA)
     materiales = []
     total_materiales = 0
-    if proyecto:
-        materiales = conn.execute('SELECT * FROM materiales WHERE proyecto_id = ? ORDER BY id', 
-                                 (proyecto['id'],)).fetchall()
-        total_materiales_result = conn.execute('SELECT SUM(valor) as total FROM materiales WHERE proyecto_id = ?', 
-                                             (proyecto['id'],)).fetchone()
-        total_materiales = total_materiales_result['total'] or 0 if total_materiales_result else 0
+    materiales = conn.execute('SELECT * FROM materiales WHERE proyecto_id = ? ORDER BY id', 
+                             (proyecto['id'],)).fetchall()
     
-    total_costos = 0
+    total_materiales_result = conn.execute('SELECT SUM(valor) as total FROM materiales WHERE proyecto_id = ?', 
+                                         (proyecto['id'],)).fetchone()
+    total_materiales = total_materiales_result['total'] or 0 if total_materiales_result else 0
+    
+    # Obtener gastos (igual que viabilidad_operativa)
     total_gastos = 0
+    total_gastos_result = conn.execute('SELECT SUM(valor) as total FROM gastos WHERE proyecto_id = ?', 
+                                     (proyecto['id'],)).fetchone()
+    total_gastos = total_gastos_result['total'] or 0 if total_gastos_result else 0
+    
+    # Obtener personal (igual que viabilidad_operativa)
     total_salarios = 0
-    if proyecto:
-        total_costos_result = conn.execute('SELECT SUM(valor) as total FROM costos WHERE proyecto_id = ?', 
-                                         (proyecto['id'],)).fetchone()
-        total_costos = total_costos_result['total'] or 0 if total_costos_result else 0
-        
-        total_gastos_result = conn.execute('SELECT SUM(valor) as total FROM gastos WHERE proyecto_id = ?', 
-                                         (proyecto['id'],)).fetchone()
-        total_gastos = total_gastos_result['total'] or 0 if total_gastos_result else 0
-        
-        total_salarios_result = conn.execute('SELECT SUM(salario_mensual) as total FROM personal WHERE proyecto_id = ?', 
-                                           (proyecto['id'],)).fetchone()
-        total_salarios = total_salarios_result['total'] or 0 if total_salarios_result else 0
+    total_salarios_result = conn.execute('SELECT SUM(salario_mensual) as total FROM personal WHERE proyecto_id = ?', 
+                                       (proyecto['id'],)).fetchone()
+    total_salarios = total_salarios_result['total'] or 0 if total_salarios_result else 0
+    
+    # Obtener costos generales (igual que viabilidad_operativa)
+    total_costos_generales = 0
+    total_costos_result = conn.execute('SELECT SUM(valor) as total FROM costos_generales WHERE proyecto_id = ?', 
+                                     (proyecto['id'],)).fetchone()
+    total_costos_generales = total_costos_result['total'] or 0 if total_costos_result else 0
+    
+    # Obtener costos por producto (para calcular total)
+    productos = conn.execute('SELECT * FROM productos WHERE proyecto_id = ? ORDER BY id', 
+                           (proyecto['id'],)).fetchall()
+    
+    total_costos_productos = 0
+    if productos:
+        for producto in productos:
+            total_producto_result = conn.execute('SELECT SUM(valor) as total FROM costos_productos WHERE producto_id = ?', 
+                                               (producto['id'],)).fetchone()
+            total_producto = total_producto_result['total'] or 0 if total_producto_result else 0
+            total_costos_productos += total_producto
     
     conn.close()
     
+    # Calcular total general (incluyendo materiales)
+    total_general = total_costos_generales + total_costos_productos + total_gastos + total_salarios + total_materiales
+    
     return render_template('proyecto/equipo_maquinaria.html', 
-                         proyecto=proyecto, 
+                         proyecto=proyecto,
                          materiales=materiales,
                          total_materiales=total_materiales,
-                         total_costos=total_costos,
                          total_gastos=total_gastos,
-                         total_salarios=total_salarios)
+                         total_salarios=total_salarios,
+                         total_costos_generales=total_costos_generales,
+                         total_costos_productos=total_costos_productos,
+                         total_general=total_general)
 
 @app.route('/proyecto/agregar-material', methods=['POST'])
 def agregar_material():
@@ -1045,10 +1071,11 @@ def flujos_caja():
     proyecto = conn.execute('SELECT * FROM proyectos ORDER BY id DESC LIMIT 1').fetchone()
     
     totales = {
-        'costos': 0,
+        'costos_generales': 0,  # Cambiado de 'costos'
         'gastos': 0,
         'salarios': 0,
-        'materiales': 0
+        'materiales': 0,
+        'costos_productos': 0   # Nuevo: para costos por producto
     }
     
     ventas_dias = None
@@ -1056,18 +1083,28 @@ def flujos_caja():
     ventas_meses = None
     ventas_anos = None
     
-    # Obtener INGRESOS (nuevo)
+    # Obtener INGRESOS
     ingresos_dias = None
     ingresos_semanas = None
     ingresos_meses = None
     ingresos_anos = None
-
     
     if proyecto:
-        # Costos
-        total_costos_result = conn.execute('SELECT SUM(valor) as total FROM costos WHERE proyecto_id = ?', 
+        # Costos generales (NO costos, es costos_generales) - CORREGIDO
+        total_costos_result = conn.execute('SELECT SUM(valor) as total FROM costos_generales WHERE proyecto_id = ?', 
                                          (proyecto['id'],)).fetchone()
-        totales['costos'] = total_costos_result['total'] or 0 if total_costos_result else 0
+        totales['costos_generales'] = total_costos_result['total'] or 0 if total_costos_result else 0
+        
+        # Costos por producto - NUEVO
+        productos = conn.execute('SELECT id FROM productos WHERE proyecto_id = ?', 
+                               (proyecto['id'],)).fetchall()
+        total_costos_productos = 0
+        for producto in productos:
+            total_producto_result = conn.execute('SELECT SUM(valor) as total FROM costos_productos WHERE producto_id = ?', 
+                                               (producto['id'],)).fetchone()
+            total_producto = total_producto_result['total'] or 0 if total_producto_result else 0
+            total_costos_productos += total_producto
+        totales['costos_productos'] = total_costos_productos
         
         # Gastos
         total_gastos_result = conn.execute('SELECT SUM(valor) as total FROM gastos WHERE proyecto_id = ?', 
@@ -1093,8 +1130,8 @@ def flujos_caja():
                                    (proyecto['id'],)).fetchone()
         ventas_anos = conn.execute('SELECT * FROM ventas_anos WHERE proyecto_id = ?', 
                                   (proyecto['id'],)).fetchone()
-    
-        # Obtener ingresos (NUEVO)
+        
+        # Obtener ingresos
         ingresos_dias = conn.execute('SELECT * FROM ingresos_dias WHERE proyecto_id = ?', 
                                    (proyecto['id'],)).fetchone()
         ingresos_semanas = conn.execute('SELECT * FROM ingresos_semanas WHERE proyecto_id = ?', 
@@ -1113,7 +1150,6 @@ def flujos_caja():
                          ventas_semanas=ventas_semanas,
                          ventas_meses=ventas_meses,
                          ventas_anos=ventas_anos,
-                         # Nuevos parámetros
                          ingresos_dias=ingresos_dias,
                          ingresos_semanas=ingresos_semanas,
                          ingresos_meses=ingresos_meses,
@@ -1949,6 +1985,7 @@ def limpiar_datos():
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
+
 
 
 proyecto-pep-v2/config.py:
@@ -2821,11 +2858,11 @@ proyecto-pep-v2/templates/proyecto/equipo_maquinaria.html:
                                 <h6 class="card-title text-center mb-3">TOTALES ACUMULADOS</h6>
                                 <div class="d-flex justify-content-between mb-2">
                                     <span>Costos de Productos:</span>
-                                    <strong class="text-success">Bs {{ total_costos_productos()|round(2) }}</strong>
+                                    <strong class="text-success">Bs {{ total_costos_productos|round(2) }}</strong>
                                 </div>
                                 <div class="d-flex justify-content-between mb-2">
                                     <span>Costos Generales:</span>
-                                    <strong class="text-success">Bs {{ total_costos_generales()|round(2) }}</strong>
+                                    <strong class="text-success">Bs {{ total_costos_generales|round(2) }}</strong>
                                 </div>
                                 <div class="d-flex justify-content-between mb-2">
                                     <span>Gastos:</span>
@@ -2842,7 +2879,7 @@ proyecto-pep-v2/templates/proyecto/equipo_maquinaria.html:
                                 <hr>
                                 <div class="d-flex justify-content-between">
                                     <strong>Total General:</strong>
-                                    <strong>Bs {{ (total_costos_productos()+total_costos_generales() + total_gastos + total_salarios + total_materiales)|round(2) }}</strong>
+                                    <strong>Bs {{ total_general|round(2)|round(2) }}</strong>
                                 </div>
                             </div>
                         </div>
@@ -3002,12 +3039,13 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
             </div>
             {% endif %}
         </div>
-        
+
         <!-- Información del Excel -->
         <div class="alert alert-info mb-4">
             <h5 class="alert-heading">ℹ️ Descripcion:</h5>
-            <p class="mb-0">En esta de <strong>"Flujos de caja"</strong> calcularemos: 
-            Las definiciones de las ventas por periodo y se calculan automáticamente los ingresos, costos, gastos, egresos y utilidad bruta.</p>
+            <p class="mb-0">En esta de <strong>"Flujos de caja"</strong> calcularemos:
+                Las definiciones de las ventas por periodo y se calculan automáticamente los ingresos, costos, gastos,
+                egresos y utilidad bruta.</p>
         </div>
 
         <!-- Advertencia si no hay proyecto -->
@@ -3018,7 +3056,7 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
             <a href="{{ url_for('datos_iniciales') }}" class="btn btn-warning">Ir a Datos Iniciales →</a>
         </div>
         {% else %}
-        
+
         <!-- Selector de tipo de flujo -->
         <div class="card shadow-sm mb-4">
             <div class="card-header bg-purple text-white">
@@ -3027,46 +3065,44 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
             <div class="card-body">
                 <div class="alert alert-light mb-4">
                     <p class="mb-0">
-                        <strong>⚠️ Nota:</strong> Estos flujos de abajo cambiarán según el tipo de flujo escogido anteriormente.
+                        <strong>⚠️ Nota:</strong> Estos flujos de abajo cambiarán según el tipo de flujo escogido
+                        anteriormente.
                     </p>
                 </div>
-                
+
                 <div class="row">
                     <div class="col-md-12">
                         <label class="form-label"><strong>elegir opcion:</strong></label>
                         <div class="d-flex flex-wrap gap-3 mb-3">
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="tipo_flujo" 
-                                       id="flujo_dias" value="dias" 
-                                       onclick="mostrarFlujo('dias')" 
-                                       {% if request.args.get('tipo') != 'semanas' and request.args.get('tipo') != 'meses' and request.args.get('tipo') != 'anos' %}checked{% endif %}>
+                                <input class="form-check-input" type="radio" name="tipo_flujo" id="flujo_dias"
+                                    value="dias" onclick="mostrarFlujo('dias')" {% if request.args.get('tipo')
+                                    !='semanas' and request.args.get('tipo') !='meses' and request.args.get('tipo')
+                                    !='anos' %}checked{% endif %}>
                                 <label class="form-check-label" for="flujo_dias">
                                     flujo por dias
                                 </label>
                             </div>
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="tipo_flujo" 
-                                       id="flujo_semanas" value="semanas" 
-                                       onclick="mostrarFlujo('semanas')"
-                                       {% if request.args.get('tipo') == 'semanas' %}checked{% endif %}>
+                                <input class="form-check-input" type="radio" name="tipo_flujo" id="flujo_semanas"
+                                    value="semanas" onclick="mostrarFlujo('semanas')" {% if
+                                    request.args.get('tipo')=='semanas' %}checked{% endif %}>
                                 <label class="form-check-label" for="flujo_semanas">
                                     flujo por semanas
                                 </label>
                             </div>
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="tipo_flujo" 
-                                       id="flujo_meses" value="meses" 
-                                       onclick="mostrarFlujo('meses')"
-                                       {% if request.args.get('tipo') == 'meses' %}checked{% endif %}>
+                                <input class="form-check-input" type="radio" name="tipo_flujo" id="flujo_meses"
+                                    value="meses" onclick="mostrarFlujo('meses')" {% if
+                                    request.args.get('tipo')=='meses' %}checked{% endif %}>
                                 <label class="form-check-label" for="flujo_meses">
                                     flujo por meses
                                 </label>
                             </div>
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="tipo_flujo" 
-                                       id="flujo_anos" value="anos" 
-                                       onclick="mostrarFlujo('anos')"
-                                       {% if request.args.get('tipo') == 'anos' %}checked{% endif %}>
+                                <input class="form-check-input" type="radio" name="tipo_flujo" id="flujo_anos"
+                                    value="anos" onclick="mostrarFlujo('anos')" {% if request.args.get('tipo')=='anos'
+                                    %}checked{% endif %}>
                                 <label class="form-check-label" for="flujo_anos">
                                     flujo por años
                                 </label>
@@ -3117,7 +3153,7 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                             </tr>
                         </table>
                     </div>
-                    
+
                     <!-- Totales acumulados -->
                     <div class="col-md-4">
                         <div class="card bg-light h-100">
@@ -3125,11 +3161,11 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                 <h6 class="card-title text-center mb-3">TOTALES ACUMULADOS</h6>
                                 <div class="d-flex justify-content-between mb-2">
                                     <span>Costos de Productos:</span>
-                                    <strong class="text-success">Bs {{ total_costos_productos()|round(2) }}</strong>
+                                    <strong class="text-success">Bs {{ totales.costos_productos|round(2) }}</strong>
                                 </div>
                                 <div class="d-flex justify-content-between mb-2">
                                     <span>Costos Generales:</span>
-                                    <strong class="text-success">Bs {{ total_costos_generales()|round(2) }}</strong>
+                                    <strong class="text-success">Bs {{ totales.costos_generales|round(2) }}</strong>
                                 </div>
                                 <div class="d-flex justify-content-between mb-2">
                                     <span>Gastos:</span>
@@ -3146,7 +3182,8 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                 <hr>
                                 <div class="d-flex justify-content-between">
                                     <strong>Total General:</strong>
-                                    <strong>Bs {{ (total_costos_productos() + total_costos_generales() + totales.gastos + totales.salarios + totales.materiales)|round(2) }}</strong>
+                                    <strong>Bs {{ (totales.costos_productos + totales.costos_generales + totales.gastos
+                                        + totales.salarios + totales.materiales)|round(2) }}</strong>
                                 </div>
                             </div>
                         </div>
@@ -3181,114 +3218,115 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                     <tr>
                                         <td class="table-secondary"><strong>Nro de productos vendidos</strong></td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="lunes" value="{{ ventas_dias.lunes if ventas_dias else 4 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="lunes"
+                                                value="{{ ventas_dias.lunes if ventas_dias else 4 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="martes" value="{{ ventas_dias.martes if ventas_dias else 3 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="martes"
+                                                value="{{ ventas_dias.martes if ventas_dias else 3 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="miercoles" value="{{ ventas_dias.miercoles if ventas_dias else 2 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="miercoles"
+                                                value="{{ ventas_dias.miercoles if ventas_dias else 2 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="jueves" value="{{ ventas_dias.jueves if ventas_dias else 4 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="jueves"
+                                                value="{{ ventas_dias.jueves if ventas_dias else 4 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="viernes" value="{{ ventas_dias.viernes if ventas_dias else 6 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="viernes"
+                                                value="{{ ventas_dias.viernes if ventas_dias else 6 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="sabado" value="{{ ventas_dias.sabado if ventas_dias else 10 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="sabado"
+                                                value="{{ ventas_dias.sabado if ventas_dias else 10 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="domingo" value="{{ ventas_dias.domingo if ventas_dias else 4 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="domingo"
+                                                value="{{ ventas_dias.domingo if ventas_dias else 4 }}" min="0">
                                         </td>
                                     </tr>
-                                    
+
                                     <!-- Cálculos automáticos -->
-                                    {% if ventas_dias %}
+                                    <!-- Cálculos automáticos -->
+                                    {% if ventas_dias and ingresos_dias %}
                                     <tr class="table-success">
                                         <td><strong>Ingresos</strong></td>
-
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="ingresos_lunes" value="{{ ingresos_dias.lunes if ingresos_dias else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="ingresos_lunes"
+                                                value="{{ ingresos_dias.lunes if ingresos_dias else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="ingresos_martes" value="{{ ingresos_dias.martes if ingresos_dias else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="ingresos_martes"
+                                                value="{{ ingresos_dias.martes if ingresos_dias else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="ingresos_miercoles" value="{{ ingresos_dias.miercoles if ingresos_dias else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center"
+                                                name="ingresos_miercoles"
+                                                value="{{ ingresos_dias.miercoles if ingresos_dias else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="ingresos_jueves" value="{{ ingresos_dias.jueves if ingresos_dias else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="ingresos_jueves"
+                                                value="{{ ingresos_dias.jueves if ingresos_dias else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="ingresos_viernes" value="{{ ingresos_dias.viernes if ingresos_dias else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center"
+                                                name="ingresos_viernes"
+                                                value="{{ ingresos_dias.viernes if ingresos_dias else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="ingresos_sabado" value="{{ ingresos_dias.sabado if ingresos_dias else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="ingresos_sabado"
+                                                value="{{ ingresos_dias.sabado if ingresos_dias else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="ingresos_domingo" value="{{ ingresos_dias.domingo if ingresos_dias else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center"
+                                                name="ingresos_domingo"
+                                                value="{{ ingresos_dias.domingo if ingresos_dias else 0 }}" min="0">
                                         </td>
-
-                                        <!-- <td>Bs {{ (ventas_dias.lunes * proyecto.precio_producto)|round(2) }}</td>
-                                        <td>Bs {{ (ventas_dias.martes * proyecto.precio_producto)|round(2) }}</td>
-                                        <td>Bs {{ (ventas_dias.miercoles * proyecto.precio_producto)|round(2) }}</td>
-                                        <td>Bs {{ (ventas_dias.jueves * proyecto.precio_producto)|round(2) }}</td>
-                                        <td>Bs {{ (ventas_dias.viernes * proyecto.precio_producto)|round(2) }}</td>
-                                        <td>Bs {{ (ventas_dias.sabado * proyecto.precio_producto)|round(2) }}</td>
-                                        <td>Bs {{ (ventas_dias.domingo * proyecto.precio_producto)|round(2) }}</td> -->
                                     </tr>
                                     <tr class="table-danger">
                                         <td><strong>Costos (diarios)</strong></td>
-                                        <!-- {% for i in range(7) %}
-                                        <td>$ {{ (totales.costos)|round(2) }}</td>     #ajustamos de "totales.costos / 30" a "totales.costos"
-                                        {% endfor %} -->
-
-                                        <td>Bs {{ (ventas_dias.lunes * total_costos_generales())|round(2) }}</td>
-                                        <td>Bs {{ (ventas_dias.martes * total_costos_generales())|round(2) }}</td>
-                                        <td>Bs {{ (ventas_dias.miercoles * total_costos_generales())|round(2) }}</td>
-                                        <td>Bs {{ (ventas_dias.jueves * total_costos_generales())|round(2) }}</td>
-                                        <td>Bs {{ (ventas_dias.viernes * total_costos_generales())|round(2) }}</td>
-                                        <td>Bs {{ (ventas_dias.sabado * total_costos_generales())|round(2) }}</td>
-                                        <td>Bs {{ (ventas_dias.domingo * total_costos_generales())|round(2) }}</td>
-
+                                        <td>Bs {{ (ventas_dias.lunes * totales.costos_generales if ventas_dias else
+                                            0)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_dias.martes * totales.costos_generales if ventas_dias else
+                                            0)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_dias.miercoles * totales.costos_generales if ventas_dias else
+                                            0)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_dias.jueves * totales.costos_generales if ventas_dias else
+                                            0)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_dias.viernes * totales.costos_generales if ventas_dias else
+                                            0)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_dias.sabado * totales.costos_generales if ventas_dias else
+                                            0)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_dias.domingo * totales.costos_generales if ventas_dias else
+                                            0)|round(2) }}</td>
                                     </tr>
                                     <tr class="table-warning">
                                         <td><strong>Gastos (diarios)</strong></td>
                                         {% for i in range(7) %}
-                                        <td>Bs {{ (totales.gastos)|round(2) }}</td>
+                                        <td>Bs {{ totales.gastos|round(2) if totales.gastos else 0|round(2) }}</td>
                                         {% endfor %}
-
                                     </tr>
                                     <tr class="table-info">
                                         <td><strong>Utilidad Bruta</strong></td>
-                                        {% set dias = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'] %}
+                                        {% set dias = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado',
+                                        'domingo'] %}
                                         {% for dia in dias %}
-                                        {% set ingresos = ingresos_dias[dia] %}
-                                        {% set costos_diarios = total_costos_generales() * ventas_dias[dia]%} 
-                                        {% set gastos_diarios = totales.gastos %} 
-                                        <td>Bs {{ (ingresos - costos_diarios - gastos_diarios)|round(2) }}</td>
+                                        {% set ingreso = ingresos_dias[dia] if ingresos_dias and ingresos_dias[dia] is
+                                        defined else 0 %}
+                                        {% set venta = ventas_dias[dia] if ventas_dias and ventas_dias[dia] is defined
+                                        else 0 %}
+                                        {% set costos_diarios = (totales.costos_generales if totales.costos_generales
+                                        else 0) * venta %}
+                                        {% set gastos_diarios = totales.gastos if totales.gastos else 0 %}
+                                        <td>Bs {{ (ingreso - costos_diarios - gastos_diarios)|round(2) }}</td>
                                         {% endfor %}
                                     </tr>
                                     {% endif %}
                                 </tbody>
                             </table>
                         </div>
-                        
+
                         <div class="mt-3 text-center">
                             <button type="submit" class="btn btn-primary btn-lg">
                                 📊 Calcular Ventas por Día
@@ -3322,23 +3360,23 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                     <tr>
                                         <td class="table-secondary"><strong>Nro de productos vendidos</strong></td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="semana1" value="{{ ventas_semanas.semana1 if ventas_semanas else 20 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="semana1"
+                                                value="{{ ventas_semanas.semana1 if ventas_semanas else 20 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="semana2" value="{{ ventas_semanas.semana2 if ventas_semanas else 14 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="semana2"
+                                                value="{{ ventas_semanas.semana2 if ventas_semanas else 14 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="semana3" value="{{ ventas_semanas.semana3 if ventas_semanas else 15 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="semana3"
+                                                value="{{ ventas_semanas.semana3 if ventas_semanas else 15 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="semana4" value="{{ ventas_semanas.semana4 if ventas_semanas else 12 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="semana4"
+                                                value="{{ ventas_semanas.semana4 if ventas_semanas else 12 }}" min="0">
                                         </td>
                                     </tr>
-                                    
+
                                     <!-- Cálculos automáticos -->
                                     {% if ventas_semanas %}
                                     <tr class="table-success">
@@ -3351,11 +3389,11 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
 
                                     <tr class="table-danger">
                                         <td><strong>Costos (semanales)</strong></td>
-                                        <td>Bs {{ (ventas_semanas.semana1 * totales.costos)|round(2) }}</td>
-                                        <td>Bs {{ (ventas_semanas.semana2 * totales.costos)|round(2) }}</td>
-                                        <td>Bs {{ (ventas_semanas.semana3 * totales.costos)|round(2) }}</td>
-                                        <td>Bs {{ (ventas_semanas.semana4 * totales.costos)|round(2) }}</td>
-                                    
+                                        <td>Bs {{ (ventas_semanas.semana1 * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_semanas.semana2 * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_semanas.semana3 * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_semanas.semana4 * totales.costos_generales)|round(2) }}</td>
+
                                     <tr class="table-warning">
                                         <td><strong>Gastos (semanales)</strong></td>
                                         {% for i in range(4) %}
@@ -3363,12 +3401,14 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                         {% endfor %}
                                     </tr>
 
-                                        <tr class="table-info">
+                                    <tr class="table-info">
                                         <td><strong>utilidad bruta</strong></td>
                                         {% set semanas = ['semana1', 'semana2', 'semana3', 'semana4'] %}
                                         {% for semana in semanas %}
-                                        {% set ingresos = ventas_semanas[semana] * proyecto.precio_producto %}
-                                        {% set costos_semanales = totales.costos * ventas_semanas[semana] %}
+                                        {% set ventas = ventas_semanas[semana] if ventas_semanas and
+                                        ventas_semanas[semana] is defined else 0 %}
+                                        {% set ingresos = ventas * proyecto.precio_producto %}
+                                        {% set costos_semanales = totales.costos_generales * ventas %}
                                         {% set gastos_semanales = totales.gastos * 7 %}
                                         <td>Bs {{ (ingresos - costos_semanales - gastos_semanales)|round(2) }}</td>
                                         {% endfor %}
@@ -3377,7 +3417,7 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                 </tbody>
                             </table>
                         </div>
-                        
+
                         <div class="mt-3 text-center">
                             <button type="submit" class="btn btn-success btn-lg">
                                 📊 Calcular Ventas por Semana
@@ -3417,38 +3457,38 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                     <tr>
                                         <td class="table-secondary"><strong>Nro de productos vendidos</strong></td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="enero" value="{{ ventas_meses.enero if ventas_meses else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="enero"
+                                                value="{{ ventas_meses.enero if ventas_meses else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="febrero" value="{{ ventas_meses.febrero if ventas_meses else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="febrero"
+                                                value="{{ ventas_meses.febrero if ventas_meses else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="marzo" value="{{ ventas_meses.marzo if ventas_meses else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="marzo"
+                                                value="{{ ventas_meses.marzo if ventas_meses else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="abril" value="{{ ventas_meses.abril if ventas_meses else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="abril"
+                                                value="{{ ventas_meses.abril if ventas_meses else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="mayo" value="{{ ventas_meses.mayo if ventas_meses else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="mayo"
+                                                value="{{ ventas_meses.mayo if ventas_meses else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="junio" value="{{ ventas_meses.junio if ventas_meses else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="junio"
+                                                value="{{ ventas_meses.junio if ventas_meses else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="julio" value="{{ ventas_meses.julio if ventas_meses else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="julio"
+                                                value="{{ ventas_meses.julio if ventas_meses else 0 }}" min="0">
                                         </td>
-                                        
+
                                     </tr>
 
                                     <!-- calculos automaticos -->
-                                     {% if ventas_meses %}
+                                    {% if ventas_meses %}
                                     <tr class="table-success">
                                         <td><strong>Ingresos</strong></td>
                                         <td>Bs {{ (ventas_meses.enero * proyecto.precio_producto)|round(2)}}</td>
@@ -3461,13 +3501,13 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                     </tr>
                                     <tr class="table-danger">
                                         <td><strong>Costos (mensuales)</strong></td>
-                                        <td>Bs {{ (ventas_meses.enero * totales.costos)|round(2)}}</td>
-                                        <td>Bs {{ (ventas_meses.febrero * totales.costos)|round(2)}}</td>
-                                        <td>Bs {{ (ventas_meses.marzo * totales.costos)|round(2)}}</td>
-                                        <td>Bs {{ (ventas_meses.abril * totales.costos)|round(2)}}</td>
-                                        <td>Bs {{ (ventas_meses.mayo * totales.costos)|round(2)}}</td>
-                                        <td>Bs {{ (ventas_meses.junio * totales.costos)|round(2)}}</td>
-                                        <td>Bs {{ (ventas_meses.julio * totales.costos)|round(2)}}</td>
+                                        <td>Bs {{ (ventas_meses.enero * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_meses.febrero * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_meses.marzo * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_meses.abril * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_meses.mayo * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_meses.junio * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_meses.julio * totales.costos_generales)|round(2) }}</td>
                                     </tr>
                                     <tr class="table-warning">
                                         <td><strong>Gastos (mensuales)</strong></td>
@@ -3477,10 +3517,13 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                     </tr>
                                     <tr class="table-info">
                                         <td><strong>Utilidad Bruta</strong></td>
-                                        {% set meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio'] %}
+                                        {% set meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio']
+                                        %}
                                         {% for mes in meses %}
-                                        {% set ingresos = ventas_meses[mes] * proyecto.precio_producto %}
-                                        {% set costos_mensuales = totales.costos * ventas_meses[mes] %}
+                                        {% set ventas = ventas_meses[mes] if ventas_meses and ventas_meses[mes] is
+                                        defined else 0 %}
+                                        {% set ingresos = ventas * proyecto.precio_producto %}
+                                        {% set costos_mensuales = totales.costos_generales * ventas %}
                                         {% set gastos_mensuales = totales.gastos * 30 %}
                                         <td>Bs {{ (ingresos - costos_mensuales - gastos_mensuales)|round(2) }}</td>
                                         {% endfor %}
@@ -3490,7 +3533,7 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                 </tbody>
                             </table>
                         </div>
-                        
+
                         <div class="mt-3 text-center">
                             <button type="submit" class="btn btn-warning btn-lg">
                                 📊 Calcular Ventas por Mes
@@ -3527,37 +3570,37 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                     <tr>
                                         <td class="table-secondary"><strong>Nro de productos vendidos</strong></td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="año1" value="{{ ventas_anos.año1 if ventas_anos else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="año1"
+                                                value="{{ ventas_anos.año1 if ventas_anos else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="año2" value="{{ ventas_anos.año2 if ventas_anos else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="año2"
+                                                value="{{ ventas_anos.año2 if ventas_anos else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="año3" value="{{ ventas_anos.año3 if ventas_anos else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="año3"
+                                                value="{{ ventas_anos.año3 if ventas_anos else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="año4" value="{{ ventas_anos.año4 if ventas_anos else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="año4"
+                                                value="{{ ventas_anos.año4 if ventas_anos else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="año5" value="{{ ventas_anos.año5 if ventas_anos else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="año5"
+                                                value="{{ ventas_anos.año5 if ventas_anos else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="año6" value="{{ ventas_anos.año6 if ventas_anos else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="año6"
+                                                value="{{ ventas_anos.año6 if ventas_anos else 0 }}" min="0">
                                         </td>
                                         <td>
-                                            <input type="number" class="form-control text-center" 
-                                                   name="año7" value="{{ ventas_anos.año7 if ventas_anos else 0 }}" min="0">
+                                            <input type="number" class="form-control text-center" name="año7"
+                                                value="{{ ventas_anos.año7 if ventas_anos else 0 }}" min="0">
                                         </td>
                                     </tr>
 
                                     <!-- calculos automaticos -->
-                                     {% if ventas_anos %}
+                                    {% if ventas_anos %}
                                     <tr class="table-success">
                                         <td><strong>Ingresos</strong></td>
                                         <td>Bs {{ (ventas_anos.año1 * proyecto.precio_producto)|round(2)}}</td>
@@ -3570,13 +3613,13 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                     </tr>
                                     <tr class="table-danger">
                                         <td><strong>Costos (anuales)</strong></td>
-                                        <td>Bs {{ (ventas_anos.año1 * totales.costos)|round(2)}}</td>
-                                        <td>Bs {{ (ventas_anos.año2 * totales.costos)|round(2)}}</td>
-                                        <td>Bs {{ (ventas_anos.año3 * totales.costos)|round(2)}}</td>
-                                        <td>Bs {{ (ventas_anos.año4 * totales.costos)|round(2)}}</td>
-                                        <td>Bs {{ (ventas_anos.año5 * totales.costos)|round(2)}}</td>
-                                        <td>Bs {{ (ventas_anos.año6 * totales.costos)|round(2)}}</td>
-                                        <td>Bs {{ (ventas_anos.año7 * totales.costos)|round(2)}}</td>
+                                        <td>Bs {{ (ventas_anos.año1 * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_anos.año2 * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_anos.año3 * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_anos.año4 * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_anos.año5 * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_anos.año6 * totales.costos_generales)|round(2) }}</td>
+                                        <td>Bs {{ (ventas_anos.año7 * totales.costos_generales)|round(2) }}</td>
                                     </tr>
                                     <tr class="table-warning">
                                         <td><strong>Gastos (anuales)</strong></td>
@@ -3588,8 +3631,10 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                         <td><strong>Utilidad Bruta</strong></td>
                                         {% set años = ['año1', 'año2', 'año3', 'año4', 'año5', 'año6', 'año7'] %}
                                         {% for año in años %}
-                                        {% set ingresos = ventas_anos[año] * proyecto.precio_producto %}
-                                        {% set costos_anuales = totales.costos * ventas_anos[año] %}
+                                        {% set ventas = ventas_anos[año] if ventas_anos and ventas_anos[año] is defined
+                                        else 0 %}
+                                        {% set ingresos = ventas * proyecto.precio_producto %}
+                                        {% set costos_anuales = totales.costos_generales * ventas %}
                                         {% set gastos_anuales = totales.gastos * 360 %}
                                         <td>Bs {{ (ingresos - costos_anuales - gastos_anuales)|round(2) }}</td>
                                         {% endfor %}
@@ -3598,7 +3643,7 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                                 </tbody>
                             </table>
                         </div>
-                        
+
                         <div class="mt-3 text-center">
                             <button type="submit" class="btn btn-info btn-lg">
                                 📊 Calcular Ventas por Año
@@ -3625,7 +3670,7 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
                 </a>
             </div>
         </div>
-        
+
         {% endif %} <!-- Fin del if proyecto -->
     </div>
 </div>
@@ -3636,28 +3681,28 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
     .bg-purple {
         background-color: #6f42c1 !important;
     }
-    
+
     .flujo-container {
         transition: all 0.3s ease;
     }
-    
+
     .form-control.text-center {
         text-align: center;
     }
-    
+
     /* Colores de tablas como en Excel */
     .table-success {
         background-color: #d1e7dd !important;
     }
-    
+
     .table-danger {
         background-color: #f8d7da !important;
     }
-    
+
     .table-warning {
         background-color: #fff3cd !important;
     }
-    
+
     .table-info {
         background-color: #cff4fc !important;
     }
@@ -3670,43 +3715,43 @@ proyecto-pep-v2/templates/proyecto/flujos_caja.html:
         document.querySelectorAll('.flujo-container').forEach(container => {
             container.style.display = 'none';
         });
-        
+
         // Mostrar el contenedor seleccionado
         document.getElementById('flujo_' + tipo + '_container').style.display = 'block';
-        
+
         // Guardar selección en localStorage
         localStorage.setItem('tipo_flujo_seleccionado', tipo);
-        
+
         // Actualizar URL sin recargar la página
         const url = new URL(window.location);
         url.searchParams.set('tipo', tipo);
         window.history.replaceState({}, '', url);
     }
-    
+
     // Cargar selección guardada al cargar la página
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', function () {
         // Verificar si hay tipo en URL
         const urlParams = new URLSearchParams(window.location.search);
         const tipoURL = urlParams.get('tipo');
-        
+
         // Verificar localStorage
         const tipoGuardado = localStorage.getItem('tipo_flujo_seleccionado');
-        
+
         // Determinar qué tipo mostrar
         let tipoAMostrar = 'dias'; // Por defecto
-        
+
         if (tipoURL) {
             tipoAMostrar = tipoURL;
         } else if (tipoGuardado) {
             tipoAMostrar = tipoGuardado;
         }
-        
+
         // Marcar el radio button correspondiente
         const radioBtn = document.getElementById('flujo_' + tipoAMostrar);
         if (radioBtn) {
             radioBtn.checked = true;
         }
-        
+
         // Mostrar el flujo correspondiente
         mostrarFlujo(tipoAMostrar);
     });
