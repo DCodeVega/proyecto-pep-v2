@@ -174,11 +174,11 @@
                                 <h6 class="card-title text-center mb-3">TOTALES ACUMULADOS</h6>
                                 <div class="d-flex justify-content-between mb-2">
                                     <span>Costos de Productos:</span>
-                                    <strong class="text-success">Bs {{ total_costos_productos()|round(2) }}</strong>
+                                    <strong class="text-success">Bs {{ total_costos_productos|round(2) }}</strong>
                                 </div>
                                 <div class="d-flex justify-content-between mb-2">
                                     <span>Costos Generales:</span>
-                                    <strong class="text-success">Bs {{ total_costos_generales()|round(2) }}</strong>
+                                    <strong class="text-success">Bs {{ total_costos_generales|round(2) }}</strong>
                                 </div>
                                 <div class="d-flex justify-content-between mb-2">
                                     <span>Gastos:</span>
@@ -195,7 +195,7 @@
                                 <hr>
                                 <div class="d-flex justify-content-between">
                                     <strong>Total General:</strong>
-                                    <strong>Bs {{ (total_costos_productos()+total_costos_generales() + total_gastos + total_salarios + total_materiales)|round(2) }}</strong>
+                                    <strong>Bs {{ total_general|round(2)|round(2) }}</strong>
                                 </div>
                             </div>
                         </div>

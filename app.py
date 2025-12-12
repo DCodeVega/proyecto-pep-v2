@@ -900,42 +900,68 @@ def eliminar_personal(id):
 def equipo_maquinaria():
     conn = get_db_connection()
     
+    # Obtener proyecto actual
     proyecto = conn.execute('SELECT * FROM proyectos ORDER BY id DESC LIMIT 1').fetchone()
     
+    if not proyecto:
+        conn.close()
+        flash('Primero debes crear un proyecto', 'warning')
+        return redirect(url_for('datos_iniciales'))
+    
+    # Obtener materiales (EQUIPO Y MAQUINARIA)
     materiales = []
     total_materiales = 0
-    if proyecto:
-        materiales = conn.execute('SELECT * FROM materiales WHERE proyecto_id = ? ORDER BY id', 
-                                 (proyecto['id'],)).fetchall()
-        total_materiales_result = conn.execute('SELECT SUM(valor) as total FROM materiales WHERE proyecto_id = ?', 
-                                             (proyecto['id'],)).fetchone()
-        total_materiales = total_materiales_result['total'] or 0 if total_materiales_result else 0
+    materiales = conn.execute('SELECT * FROM materiales WHERE proyecto_id = ? ORDER BY id', 
+                             (proyecto['id'],)).fetchall()
     
-    total_costos = 0
+    total_materiales_result = conn.execute('SELECT SUM(valor) as total FROM materiales WHERE proyecto_id = ?', 
+                                         (proyecto['id'],)).fetchone()
+    total_materiales = total_materiales_result['total'] or 0 if total_materiales_result else 0
+    
+    # Obtener gastos (igual que viabilidad_operativa)
     total_gastos = 0
+    total_gastos_result = conn.execute('SELECT SUM(valor) as total FROM gastos WHERE proyecto_id = ?', 
+                                     (proyecto['id'],)).fetchone()
+    total_gastos = total_gastos_result['total'] or 0 if total_gastos_result else 0
+    
+    # Obtener personal (igual que viabilidad_operativa)
     total_salarios = 0
-    if proyecto:
-        total_costos_result = conn.execute('SELECT SUM(valor) as total FROM costos WHERE proyecto_id = ?', 
-                                         (proyecto['id'],)).fetchone()
-        total_costos = total_costos_result['total'] or 0 if total_costos_result else 0
-        
-        total_gastos_result = conn.execute('SELECT SUM(valor) as total FROM gastos WHERE proyecto_id = ?', 
-                                         (proyecto['id'],)).fetchone()
-        total_gastos = total_gastos_result['total'] or 0 if total_gastos_result else 0
-        
-        total_salarios_result = conn.execute('SELECT SUM(salario_mensual) as total FROM personal WHERE proyecto_id = ?', 
-                                           (proyecto['id'],)).fetchone()
-        total_salarios = total_salarios_result['total'] or 0 if total_salarios_result else 0
+    total_salarios_result = conn.execute('SELECT SUM(salario_mensual) as total FROM personal WHERE proyecto_id = ?', 
+                                       (proyecto['id'],)).fetchone()
+    total_salarios = total_salarios_result['total'] or 0 if total_salarios_result else 0
+    
+    # Obtener costos generales (igual que viabilidad_operativa)
+    total_costos_generales = 0
+    total_costos_result = conn.execute('SELECT SUM(valor) as total FROM costos_generales WHERE proyecto_id = ?', 
+                                     (proyecto['id'],)).fetchone()
+    total_costos_generales = total_costos_result['total'] or 0 if total_costos_result else 0
+    
+    # Obtener costos por producto (para calcular total)
+    productos = conn.execute('SELECT * FROM productos WHERE proyecto_id = ? ORDER BY id', 
+                           (proyecto['id'],)).fetchall()
+    
+    total_costos_productos = 0
+    if productos:
+        for producto in productos:
+            total_producto_result = conn.execute('SELECT SUM(valor) as total FROM costos_productos WHERE producto_id = ?', 
+                                               (producto['id'],)).fetchone()
+            total_producto = total_producto_result['total'] or 0 if total_producto_result else 0
+            total_costos_productos += total_producto
     
     conn.close()
     
+    # Calcular total general (incluyendo materiales)
+    total_general = total_costos_generales + total_costos_productos + total_gastos + total_salarios + total_materiales
+    
     return render_template('proyecto/equipo_maquinaria.html', 
-                         proyecto=proyecto, 
+                         proyecto=proyecto,
                          materiales=materiales,
                          total_materiales=total_materiales,
-                         total_costos=total_costos,
                          total_gastos=total_gastos,
-                         total_salarios=total_salarios)
+                         total_salarios=total_salarios,
+                         total_costos_generales=total_costos_generales,
+                         total_costos_productos=total_costos_productos,
+                         total_general=total_general)
 
 @app.route('/proyecto/agregar-material', methods=['POST'])
 def agregar_material():
