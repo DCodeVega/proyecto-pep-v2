@@ -1659,23 +1659,41 @@ def calculos_financieros():
         'ingresos': {}   # Nuevo: para datos de ingresos
     }
     
-    # Obtener totales
-    # Costos
-    total_costos_result = conn.execute('SELECT SUM(valor) as total FROM costos WHERE proyecto_id = ?', 
-                                     (proyecto['id'],)).fetchone()
-    resultados['totales']['costos'] = total_costos_result['total'] or 0 if total_costos_result else 0
+    # Obtener productos del proyecto
+    productos = conn.execute('SELECT * FROM productos WHERE proyecto_id = ?', 
+                           (proyecto['id'],)).fetchall()
     
-    # Gastos
+    # Obtener totales - CORREGIDO para nueva estructura de base de datos
+    
+    # 1. Costos Generales (NO costos, es costos_generales)
+    total_costos_generales_result = conn.execute('SELECT SUM(valor) as total FROM costos_generales WHERE proyecto_id = ?', 
+                                               (proyecto['id'],)).fetchone()
+    resultados['totales']['costos_generales'] = total_costos_generales_result['total'] or 0 if total_costos_generales_result else 0
+    
+    # 2. Costos por Producto
+    total_costos_productos = 0
+    if productos:
+        for producto in productos:
+            total_producto_result = conn.execute('SELECT SUM(valor) as total FROM costos_productos WHERE producto_id = ?', 
+                                               (producto['id'],)).fetchone()
+            total_producto = total_producto_result['total'] or 0 if total_producto_result else 0
+            total_costos_productos += total_producto
+    resultados['totales']['costos_productos'] = total_costos_productos
+    
+    # 3. Total Costos (suma de generales + por producto)
+    resultados['totales']['costos'] = resultados['totales']['costos_generales'] + resultados['totales']['costos_productos']
+    
+    # 4. Gastos
     total_gastos_result = conn.execute('SELECT SUM(valor) as total FROM gastos WHERE proyecto_id = ?', 
                                      (proyecto['id'],)).fetchone()
-    resultados['totales']['gastos'] = total_gastos_result['total'] or 0 if total_costos_result else 0
+    resultados['totales']['gastos'] = total_gastos_result['total'] or 0 if total_gastos_result else 0
     
-    # Personal
+    # 5. Personal
     total_salarios_result = conn.execute('SELECT SUM(salario_mensual) as total FROM personal WHERE proyecto_id = ?', 
                                        (proyecto['id'],)).fetchone()
     resultados['totales']['salarios'] = total_salarios_result['total'] or 0 if total_salarios_result else 0
     
-    # Materiales
+    # 6. Materiales
     total_materiales_result = conn.execute('SELECT SUM(valor) as total FROM materiales WHERE proyecto_id = ?', 
                                          (proyecto['id'],)).fetchone()
     resultados['totales']['materiales'] = total_materiales_result['total'] or 0 if total_materiales_result else 0
@@ -1683,20 +1701,15 @@ def calculos_financieros():
     # Inversión inicial
     inversion_inicial = proyecto['valor_inversion'] if proyecto['tiene_inversion'] == 1 else 0
     
-    # Obtener ventas por año para flujos
+    # ========== OBTENER DATOS DE VENTAS ==========
+    ventas_dias = conn.execute('SELECT * FROM ventas_dias WHERE proyecto_id = ?', 
+                              (proyecto['id'],)).fetchone()
+    ventas_semanas = conn.execute('SELECT * FROM ventas_semanas WHERE proyecto_id = ?', 
+                                 (proyecto['id'],)).fetchone()
+    ventas_meses = conn.execute('SELECT * FROM ventas_meses WHERE proyecto_id = ?', 
+                               (proyecto['id'],)).fetchone()
     ventas_anos = conn.execute('SELECT * FROM ventas_anos WHERE proyecto_id = ?', 
                               (proyecto['id'],)).fetchone()
-    
-    # ========== OBTENER DATOS DE VENTAS ==========
-    # Obtener ventas
-    ventas_dias = conn.execute('SELECT * FROM ventas_dias WHERE proyecto_id = ?', 
-                                  (proyecto['id'],)).fetchone()
-    ventas_semanas = conn.execute('SELECT * FROM ventas_semanas WHERE proyecto_id = ?', 
-                                     (proyecto['id'],)).fetchone()
-    ventas_meses = conn.execute('SELECT * FROM ventas_meses WHERE proyecto_id = ?', 
-                                   (proyecto['id'],)).fetchone()
-    ventas_anos = conn.execute('SELECT * FROM ventas_anos WHERE proyecto_id = ?', 
-                                  (proyecto['id'],)).fetchone()
     
     resultados['ventas'] = {
         'anos': ventas_anos,
@@ -1747,13 +1760,13 @@ def calculos_financieros():
     
     # ========== CALCULAR PROMEDIOS ==========
     
-    # Si no hay ingresos directos, calcularlos desde ventas
-    if total_ingresos_anuales == 0 and total_ventas_anuales > 0:
-        # Asumir que ingresos = ventas * precio del primer producto
-        productos = obtener_productos_actuales()  # Tu función existente
-        if productos and len(productos) > 0:
-            precio_promedio = productos[0]['precio']  # O calcular promedio
-            total_ingresos_anuales = total_ventas_anuales * precio_promedio
+    # Si no hay ingresos directos, calcularlos desde ventas y productos
+    if total_ingresos_anuales == 0 and total_ventas_anuales > 0 and productos:
+        # Calcular precio promedio de productos
+        precio_total = sum([p['precio'] for p in productos])
+        precio_promedio = precio_total / len(productos) if productos else 0
+        total_ingresos_anuales = total_ventas_anuales * precio_promedio
+        resultados['calculos']['total_ingresos_anuales'] = total_ingresos_anuales
     
     resultados['calculos']['ingresos_promedio_anual'] = total_ingresos_anuales / 7 if total_ingresos_anuales > 0 else 0
     
@@ -1764,20 +1777,25 @@ def calculos_financieros():
     flujos_anuales.append(-inversion_inicial)
     
     # Años 1-7: Flujos netos
-    if ventas_anos:
-        # Calcular ingresos anuales usando get()
+    if ventas_anos and productos:
+        # Calcular precio promedio para los cálculos
+        precio_total = sum([p['precio'] for p in productos])
+        precio_promedio = precio_total / len(productos) if productos else 0
+        
         for i in range(1, 8):
             ventas_key = f'año{i}'
-            # Usar get() en lugar de getattr para mayor seguridad
-            ventas = ventas_anos[ventas_key] if ventas_key in ventas_anos.keys() else 0
-            ingresos_anuales = ventas * proyecto['precio_producto']
+            # Usar get() para mayor seguridad
+            ventas = ventas_anos[ventas_key] if ventas_anos and ventas_key in ventas_anos.keys() else 0
+            ingresos_anuales = ventas * precio_promedio
             
-            # Calcular flujo neto
+            # Calcular flujo neto - CORREGIDO con nueva estructura
+            # Distribuir costos en 7 años
             costo_anual = resultados['totales']['costos'] / 7 if resultados['totales']['costos'] > 0 else 0
             gasto_anual = resultados['totales']['gastos'] / 7 if resultados['totales']['gastos'] > 0 else 0
             salario_anual = resultados['totales']['salarios'] * 12 if resultados['totales']['salarios'] > 0 else 0
+            material_anual = resultados['totales']['materiales'] / 7 if resultados['totales']['materiales'] > 0 else 0
             
-            flujo_neto = ingresos_anuales - costo_anual - gasto_anual - salario_anual
+            flujo_neto = ingresos_anuales - costo_anual - gasto_anual - salario_anual - material_anual
             flujos_anuales.append(flujo_neto)
     else:
         # Valores por defecto si no hay ventas registradas
@@ -1833,13 +1851,19 @@ def calculos_financieros():
     # CALCULAR RESUMEN DE VENTAS
     resumen_ventas = calcular_resumen_ventas(ventas_dias)
     
-    # ¡IMPORTANTE: PASAR resumen_ventas AL TEMPLATE!
+    # También necesitarás estas funciones para el template
+    # (ya están definidas en tu app.py)
+    total_costos_generales_valor = resultados['totales']['costos_generales']
+    total_costos_productos_valor = resultados['totales']['costos_productos']
+    
     return render_template('resultados/calculo_financiero.html',
                         resultados=resultados,
                         ventas_anos=ventas_anos,
                         ingresos_anos=ingresos_anos,
                         productos=productos,
-                        resumen_ventas=resumen_ventas)  # ¡ESTA LÍNEA ES LA CLAVE!  # También pasa productos
+                        resumen_ventas=resumen_ventas,
+                        total_costos_generales_valor=total_costos_generales_valor,
+                        total_costos_productos_valor=total_costos_productos_valor) # ¡ESTA LÍNEA ES LA CLAVE!  # También pasa productos
     
 
 def obtener_proyecto_actual():
