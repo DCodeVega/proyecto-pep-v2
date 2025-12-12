@@ -1,0 +1,28 @@
+<div class="modal fade" id="modalEditarCostoProducto" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">Editar Costo por Producto</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('editar_costo_producto', id=costo.id) }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="nombre_costo_producto" class="form-label">Nombre del costo:</label>
+                        <input type="text" class="form-control" id="nombre_costo_producto" 
+                               name="nombre_costo_producto" value="{{ costo.nombre }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="valor_costo_producto" class="form-label">Valor:</label>
+                        <input type="number" class="form-control" id="valor_costo_producto" 
+                               name="valor_costo_producto" value="{{ costo.valor }}" step="0.01" min="0" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
