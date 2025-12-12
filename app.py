@@ -773,39 +773,65 @@ def eliminar_gasto(id):
 @app.route('/proyecto/viabilidad-operativa')
 def viabilidad_operativa():
     conn = get_db_connection()
-    proyecto = obtener_proyecto_actual()
-    productos = obtener_productos_actuales()
     
+    # Obtener proyecto actual
     proyecto = conn.execute('SELECT * FROM proyectos ORDER BY id DESC LIMIT 1').fetchone()
     
+    if not proyecto:
+        conn.close()
+        flash('Primero debes crear un proyecto', 'warning')
+        return redirect(url_for('datos_iniciales'))
+    
+    # Obtener productos (opcional, para mostrar info)
+    productos = []
+    productos = conn.execute('SELECT * FROM productos WHERE proyecto_id = ? ORDER BY id', 
+                           (proyecto['id'],)).fetchall()
+    
+    # Obtener personal
     personal = []
     total_salarios = 0
-    if proyecto:
-        personal = conn.execute('SELECT * FROM personal WHERE proyecto_id = ? ORDER BY id', 
-                               (proyecto['id'],)).fetchall()
-        total_salarios_result = conn.execute('SELECT SUM(salario_mensual) as total FROM personal WHERE proyecto_id = ?', 
-                                           (proyecto['id'],)).fetchone()
-        total_salarios = total_salarios_result['total'] or 0 if total_salarios_result else 0
+    personal = conn.execute('SELECT * FROM personal WHERE proyecto_id = ? ORDER BY id', 
+                           (proyecto['id'],)).fetchall()
     
-    total_costos = 0
+    total_salarios_result = conn.execute('SELECT SUM(salario_mensual) as total FROM personal WHERE proyecto_id = ?', 
+                                       (proyecto['id'],)).fetchone()
+    total_salarios = total_salarios_result['total'] or 0 if total_salarios_result else 0
+    
+    # Obtener costos generales (NO costos, es costos_generales)
+    total_costos_generales = 0
+    total_costos_result = conn.execute('SELECT SUM(valor) as total FROM costos_generales WHERE proyecto_id = ?', 
+                                     (proyecto['id'],)).fetchone()
+    total_costos_generales = total_costos_result['total'] or 0 if total_costos_result else 0
+    
+    # Obtener costos por producto
+    total_costos_productos = 0
+    if productos:
+        for producto in productos:
+            total_producto_result = conn.execute('SELECT SUM(valor) as total FROM costos_productos WHERE producto_id = ?', 
+                                               (producto['id'],)).fetchone()
+            total_producto = total_producto_result['total'] or 0 if total_producto_result else 0
+            total_costos_productos += total_producto
+    
+    # Obtener gastos
     total_gastos = 0
-    if proyecto:
-        total_costos_result = conn.execute('SELECT SUM(valor) as total FROM costos WHERE proyecto_id = ?', 
-                                         (proyecto['id'],)).fetchone()
-        total_costos = total_costos_result['total'] or 0 if total_costos_result else 0
-        
-        total_gastos_result = conn.execute('SELECT SUM(valor) as total FROM gastos WHERE proyecto_id = ?', 
-                                         (proyecto['id'],)).fetchone()
-        total_gastos = total_gastos_result['total'] or 0 if total_gastos_result else 0
+    total_gastos_result = conn.execute('SELECT SUM(valor) as total FROM gastos WHERE proyecto_id = ?', 
+                                     (proyecto['id'],)).fetchone()
+    total_gastos = total_gastos_result['total'] or 0 if total_gastos_result else 0
     
     conn.close()
     
+    # Calcular total general
+    total_general = total_costos_generales + total_costos_productos + total_gastos + total_salarios
+    
     return render_template('proyecto/viabilidad_operativa.html', 
-                         proyecto=proyecto, 
+                         proyecto=proyecto,
+                         productos=productos,
                          personal=personal,
                          total_salarios=total_salarios,
-                         total_costos=total_costos,
-                         total_gastos=total_gastos)
+                         total_costos_generales=total_costos_generales,
+                         total_costos_productos=total_costos_productos,
+                         total_gastos=total_gastos,
+                         total_general=total_general)
 
 @app.route('/proyecto/agregar-personal', methods=['POST'])
 def agregar_personal():
