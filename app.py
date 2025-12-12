@@ -1031,10 +1031,11 @@ def flujos_caja():
     proyecto = conn.execute('SELECT * FROM proyectos ORDER BY id DESC LIMIT 1').fetchone()
     
     totales = {
-        'costos': 0,
+        'costos_generales': 0,  # Cambiado de 'costos'
         'gastos': 0,
         'salarios': 0,
-        'materiales': 0
+        'materiales': 0,
+        'costos_productos': 0   # Nuevo: para costos por producto
     }
     
     ventas_dias = None
@@ -1042,18 +1043,28 @@ def flujos_caja():
     ventas_meses = None
     ventas_anos = None
     
-    # Obtener INGRESOS (nuevo)
+    # Obtener INGRESOS
     ingresos_dias = None
     ingresos_semanas = None
     ingresos_meses = None
     ingresos_anos = None
-
     
     if proyecto:
-        # Costos
-        total_costos_result = conn.execute('SELECT SUM(valor) as total FROM costos WHERE proyecto_id = ?', 
+        # Costos generales (NO costos, es costos_generales) - CORREGIDO
+        total_costos_result = conn.execute('SELECT SUM(valor) as total FROM costos_generales WHERE proyecto_id = ?', 
                                          (proyecto['id'],)).fetchone()
-        totales['costos'] = total_costos_result['total'] or 0 if total_costos_result else 0
+        totales['costos_generales'] = total_costos_result['total'] or 0 if total_costos_result else 0
+        
+        # Costos por producto - NUEVO
+        productos = conn.execute('SELECT id FROM productos WHERE proyecto_id = ?', 
+                               (proyecto['id'],)).fetchall()
+        total_costos_productos = 0
+        for producto in productos:
+            total_producto_result = conn.execute('SELECT SUM(valor) as total FROM costos_productos WHERE producto_id = ?', 
+                                               (producto['id'],)).fetchone()
+            total_producto = total_producto_result['total'] or 0 if total_producto_result else 0
+            total_costos_productos += total_producto
+        totales['costos_productos'] = total_costos_productos
         
         # Gastos
         total_gastos_result = conn.execute('SELECT SUM(valor) as total FROM gastos WHERE proyecto_id = ?', 
@@ -1079,8 +1090,8 @@ def flujos_caja():
                                    (proyecto['id'],)).fetchone()
         ventas_anos = conn.execute('SELECT * FROM ventas_anos WHERE proyecto_id = ?', 
                                   (proyecto['id'],)).fetchone()
-    
-        # Obtener ingresos (NUEVO)
+        
+        # Obtener ingresos
         ingresos_dias = conn.execute('SELECT * FROM ingresos_dias WHERE proyecto_id = ?', 
                                    (proyecto['id'],)).fetchone()
         ingresos_semanas = conn.execute('SELECT * FROM ingresos_semanas WHERE proyecto_id = ?', 
@@ -1099,7 +1110,6 @@ def flujos_caja():
                          ventas_semanas=ventas_semanas,
                          ventas_meses=ventas_meses,
                          ventas_anos=ventas_anos,
-                         # Nuevos parámetros
                          ingresos_dias=ingresos_dias,
                          ingresos_semanas=ingresos_semanas,
                          ingresos_meses=ingresos_meses,
